@@ -3,43 +3,17 @@ import matplotlib.pyplot as plt
 import sympy as sp
 import networkx as nx
 
-def padKeyForAES(key):
-    # Target length for AES-128
-    target_length = 16
-    
-    # Convert the key to bytes if it's a string
-    if isinstance(key, str):
-        key_bytes = key.encode()
-    else:
-        key_bytes = key
-    
-    # Check the length of the key
-    key_length = len(key_bytes)
-    
-    if key_length < target_length:
-        # If the key is too short, pad it with zeros
-        padded_key = key_bytes + b'\x00' * (target_length - key_length)
-    elif key_length > target_length:
-        # If the key is too long, truncate it
-        padded_key = key_bytes[:target_length]
-    else:
-        # If the key is already the correct length, do nothing
-        padded_key = key_bytes
-    
-    return padded_key
 
-def text2Unicode(text):
-    # Ensure text length is 16 for simplicity
+def preparetext(text):
     text = text.ljust(16)[:16]
-    text_matrix = np.array([ord(c) for c in text], dtype=np.uint8).reshape(4, 4)
-    return text_matrix
+    textm = np.array([ord(c) for c in text], dtype=np.uint8).reshape(4, 4)
+    return textm
 
-def unicode2Text(matrix):
+def matrixtotext(matrix):
     text = ''.join(chr(int(c)) for c in matrix.flatten())
     return text
 
 def subBytes(A):
-    # Implementing S-box substitution
     s_box = np.array([
         [0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76],
         [0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0],
@@ -58,11 +32,17 @@ def subBytes(A):
         [0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf],
         [0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16]
     ], dtype=np.uint8)
+# Take one byte input and get a byte from the S-box.
+# It is assumed that the input 'A' is an integer (byte value).
+# Using matrix indexing, we locate the appropriate element where:
+#: The leftmost four bits of 'A' decide the row; the rightmost four bits of 'A' determine the column.
+# This is accomplished by taking 'A' modulo 16 for the column (mask off the top bits) and dividing it by 16 for the row (shift right 4 bits).
+
     B = s_box[A // 0x10, A % 0x10]
+
     return B
 
 def invSubBytes(A):
-    # Implementing inverse S-box substitution
     inv_s_box = np.array([
         [0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38, 0xbf, 0x40, 0xa3, 0x9e, 0x81, 0xf3, 0xd7, 0xfb],
         [0x7c, 0xe3, 0x39, 0x82, 0x9b, 0x2f, 0xff, 0x87, 0x34, 0x8e, 0x43, 0x44, 0xc4, 0xde, 0xe9, 0xcb],
@@ -81,19 +61,32 @@ def invSubBytes(A):
         [0xa0, 0xe0, 0x3b, 0x4d, 0xae, 0x2a, 0xf5, 0xb0, 0xc8, 0xeb, 0xbb, 0x3c, 0x83, 0x53, 0x99, 0x61],
         [0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d]
     ], dtype=np.uint8)
+# Getting a byte from the inverse S-box # The input byte 'A' is what we need to determine its inverse transformation for.
+# To find the row, we first divide 'A' by 16 (or shift 4 bits to the right).
+# Next, we calculate the column by dividing 'A' by 16 and finding the remainder.
+# The top and lower 4 bits of the byte are extracted as the foundation for this indexing.
     B = inv_s_box[A // 0x10, A % 0x10]
+
     return B
 
 def shiftRows(A):
-    B = np.array([np.roll(row, -i) for i, row in enumerate(A)], dtype=np.uint8)
+    shiftedrows = []
+    for j, row in enumerate(A):
+        newrow = np.roll(row, -j)
+        shiftedrows.append(newrow)
+    B = np.array(shiftedrows, dtype=np.uint8)
     return B
 
 def invShiftRows(A):
-    B = np.array([np.roll(row, i) for i, row in enumerate(A)], dtype=np.uint8)
+    shiftedbackrows = []
+    for j, row in enumerate(A):
+       
+        newrow = np.roll(row, j)
+        shiftedbackrows.append(newrow)
+    B = np.array(shiftedbackrows, dtype=np.uint8)
     return B
 
-def galois_multiplication(a, b):
-    """Perform Galois multiplication of two bytes."""
+def multgal(a, b):
     p = 0
     for i in range(8):
         if b & 1:
@@ -101,33 +94,32 @@ def galois_multiplication(a, b):
         hi_bit_set = a & 0x80
         a <<= 1
         if hi_bit_set:
-            a ^= 0x1b  # x^8 + x^4 + x^3 + x + 1
+            a ^= 0x1b  
         b >>= 1
     return p % 256
 
 def mixCol(A):
-    """Mix columns using Galois Field multiplication."""
+# galois field mulyt
     B = np.zeros((4,4), dtype=int)
     for c in range(4):
         col = A[:, c]
         B[:, c] = [
-            galois_multiplication(0x02, col[0]) ^ galois_multiplication(0x03, col[1]) ^ col[2] ^ col[3],
-            col[0] ^ galois_multiplication(0x02, col[1]) ^ galois_multiplication(0x03, col[2]) ^ col[3],
-            col[0] ^ col[1] ^ galois_multiplication(0x02, col[2]) ^ galois_multiplication(0x03, col[3]),
-            galois_multiplication(0x03, col[0]) ^ col[1] ^ col[2] ^ galois_multiplication(0x02, col[3])
+            multgal(0x02, col[0]) ^ multgal(0x03, col[1]) ^ col[2] ^ col[3],
+            col[0] ^ multgal(0x02, col[1]) ^ multgal(0x03, col[2]) ^ col[3],
+            col[0] ^ col[1] ^ multgal(0x02, col[2]) ^ multgal(0x03, col[3]),
+            multgal(0x03, col[0]) ^ col[1] ^ col[2] ^ multgal(0x02, col[3])
         ]
     return B
 
 def invMixCol(A):
-    """Inverse mix columns using Galois Field multiplication."""
     B = np.zeros((4,4), dtype=int)
     for c in range(4):
         col = A[:, c]
         B[:, c] = [
-            galois_multiplication(0x0e, col[0]) ^ galois_multiplication(0x0b, col[1]) ^ galois_multiplication(0x0d, col[2]) ^ galois_multiplication(0x09, col[3]),
-            galois_multiplication(0x09, col[0]) ^ galois_multiplication(0x0e, col[1]) ^ galois_multiplication(0x0b, col[2]) ^ galois_multiplication(0x0d, col[3]),
-            galois_multiplication(0x0d, col[0]) ^ galois_multiplication(0x09, col[1]) ^ galois_multiplication(0x0e, col[2]) ^ galois_multiplication(0x0b, col[3]),
-            galois_multiplication(0x0b, col[0]) ^ galois_multiplication(0x0d, col[1]) ^ galois_multiplication(0x09, col[2]) ^ galois_multiplication(0x0e, col[3])
+            multgal(0x0e, col[0]) ^ multgal(0x0b, col[1]) ^ multgal(0x0d, col[2]) ^ multgal(0x09, col[3]),
+            multgal(0x09, col[0]) ^ multgal(0x0e, col[1]) ^ multgal(0x0b, col[2]) ^ multgal(0x0d, col[3]),
+            multgal(0x0d, col[0]) ^ multgal(0x09, col[1]) ^ multgal(0x0e, col[2]) ^ multgal(0x0b, col[3]),
+            multgal(0x0b, col[0]) ^ multgal(0x0d, col[1]) ^ multgal(0x09, col[2]) ^ multgal(0x0e, col[3])
         ]
     return B
 
@@ -135,80 +127,76 @@ def addRoundKey(A, key):
     return np.bitwise_xor(A, key)
 
 def keyExpansion(key):
-    # Placeholder for the key expansion implementation
-    # This should expand the initial key to an array of 176 bytes (11 keys of 16 bytes each for AES-128)
     expanded_key = np.zeros((176), dtype=np.uint8)
-    # Implement the actual key expansion logic here
-    return expanded_key.reshape((11, 4, 4))  # Reshape for easier use in AES rounds
 
-def aesEncrypt(plain_text, key):
-    key_matrix = text2Unicode(key)
-    expanded_keys = keyExpansion(key_matrix.flatten())  # Flatten for simplicity in key expansion logic
-    
-    text_matrix = text2Unicode(plain_text)
-    text_matrix = addRoundKey(text_matrix, expanded_keys[0])
-    
-    for round in range(1, 10):  # 9 rounds with all steps
-        text_matrix = subBytes(text_matrix)
-        text_matrix = shiftRows(text_matrix)
-        text_matrix = mixCol(text_matrix)
-        text_matrix = addRoundKey(text_matrix, expanded_keys[round])
-    
-    # Final round without mixColumns
-    text_matrix = subBytes(text_matrix)
-    text_matrix = shiftRows(text_matrix)
-    text_matrix = addRoundKey(text_matrix, expanded_keys[10])
-    
-    cipher_text = unicode2Text(text_matrix)
-    return cipher_text
+    return expanded_key.reshape((11, 4, 4)) 
 
-def aesDecrypt(cipher_text, key):
-    key_matrix = text2Unicode(key)
-    expanded_keys = keyExpansion(key_matrix.flatten())
+def encrypt(plain_text, key):
+    keym = preparetext(key)
+    expandedkey = keyExpansion(keym.flatten()) 
     
-    cipher_matrix = text2Unicode(cipher_text)
-    cipher_matrix = addRoundKey(cipher_matrix, expanded_keys[10])
+    textm = preparetext(plain_text)
+    textm = addRoundKey(textm, expandedkey[0])
     
-    for round in range(9, 0, -1):  # Reverse order for decryption
-        cipher_matrix = invShiftRows(cipher_matrix)
-        cipher_matrix = invSubBytes(cipher_matrix)
-        cipher_matrix = addRoundKey(cipher_matrix, expanded_keys[round])
-        cipher_matrix = invMixCol(cipher_matrix)
+    for round in range(1, 10): 
+        textm = subBytes(textm)
+        textm = shiftRows(textm)
+        textm = mixCol(textm)
+        textm = addRoundKey(textm, expandedkey[round])
     
-    # Final round without invMixColumns
-    cipher_matrix = invShiftRows(cipher_matrix)
-    cipher_matrix = invSubBytes(cipher_matrix)
-    cipher_matrix = addRoundKey(cipher_matrix, expanded_keys[0])
+    textm = subBytes(textm)
+    textm = shiftRows(textm)
+    textm = addRoundKey(textm, expandedkey[10])
     
-    decrypted_text = unicode2Text(cipher_matrix)
-    return decrypted_text
+    ctext = matrixtotext(textm)
+    return ctext
+
+def decrypt(ctext, key):
+    keym = preparetext(key)
+    expandedkey = keyExpansion(keym.flatten())
+    
+    cmatrix = preparetext(ctext)
+    cmatrix = addRoundKey(cmatrix, expandedkey[10])
+    
+    for round in range(9, 0, -1):  
+        cmatrix = invShiftRows(cmatrix)
+        cmatrix = invSubBytes(cmatrix)
+        cmatrix = addRoundKey(cmatrix, expandedkey[round])
+        cmatrix = invMixCol(cmatrix)
+    
+    
+    cmatrix = invShiftRows(cmatrix)
+    cmatrix = invSubBytes(cmatrix)
+    cmatrix = addRoundKey(cmatrix, expandedkey[0])
+    
+    dectext = matrixtotext(cmatrix)
+    return dectext
 
 def gf_add(a, b):
     return a ^ b 
 
-def visualize_matrix(matrix, title):
+def plaintextmat(matrix, title):
     plt.figure(figsize=(6, 4))
     plt.imshow(matrix, cmap='viridis', interpolation='nearest')
     plt.title(title)
     plt.colorbar()
     plt.show()
 
-def visualize_sbox_substitution(input_matrix, output_matrix):
+def sboxvisual(input_matrix, output_matrix):
     fig, axs = plt.subplots(1, 2, figsize=(12, 4))
 
-    # Input matrix visualization
     axs[0].imshow(input_matrix, cmap='viridis', interpolation='nearest')
     axs[0].set_title('Input Matrix (Before SubBytes)')
     axs[0].set_xticks(np.arange(0, 4, 1))
     axs[0].set_yticks(np.arange(0, 4, 1))
 
-    # Output matrix visualization
+
     axs[1].imshow(output_matrix, cmap='viridis', interpolation='nearest')
     axs[1].set_title('Output Matrix (After SubBytes)')
     axs[1].set_xticks(np.arange(0, 4, 1))
     axs[1].set_yticks(np.arange(0, 4, 1))
 
-    # Highlight differences between input and output
+
     for i in range(4):
         for j in range(4):
             if input_matrix[i, j] != output_matrix[i, j]:
@@ -218,22 +206,22 @@ def visualize_sbox_substitution(input_matrix, output_matrix):
     plt.tight_layout()
     plt.show()
 
-def visualize_shiftrows(input_matrix, output_matrix):
+def shiftrowvis(input_matrix, output_matrix):
     fig, axs = plt.subplots(1, 2, figsize=(12, 4))
 
-    # Input matrix visualization
+
     axs[0].imshow(input_matrix, cmap='viridis', interpolation='nearest')
     axs[0].set_title('Input Matrix (Before ShiftRows)')
     axs[0].set_xticks(np.arange(0, 4, 1))
     axs[0].set_yticks(np.arange(0, 4, 1))
 
-    # Output matrix visualization
+  
     axs[1].imshow(output_matrix, cmap='viridis', interpolation='nearest')
     axs[1].set_title('Output Matrix (After ShiftRows)')
     axs[1].set_xticks(np.arange(0, 4, 1))
     axs[1].set_yticks(np.arange(0, 4, 1))
 
-    # Highlight differences between input and output
+  
     for i in range(4):
         for j in range(4):
             if input_matrix[i, j] != output_matrix[i, j]:
@@ -243,22 +231,22 @@ def visualize_shiftrows(input_matrix, output_matrix):
     plt.tight_layout()
     plt.show()
 
-def visualize_mixcolumns(input_matrix, output_matrix):
+def mixcolvis(input_matrix, output_matrix):
     fig, axs = plt.subplots(1, 2, figsize=(12, 4))
 
-    # Input matrix visualization
+    
     axs[0].imshow(input_matrix, cmap='viridis', interpolation='nearest')
     axs[0].set_title('Input Matrix (Before MixColumns)')
     axs[0].set_xticks(np.arange(0, 4, 1))
     axs[0].set_yticks(np.arange(0, 4, 1))
 
-    # Output matrix visualization
+   
     axs[1].imshow(output_matrix, cmap='viridis', interpolation='nearest')
     axs[1].set_title('Output Matrix (After MixColumns)')
     axs[1].set_xticks(np.arange(0, 4, 1))
     axs[1].set_yticks(np.arange(0, 4, 1))
 
-    # Highlight differences between input and output
+    
     for i in range(4):
         for j in range(4):
             if input_matrix[i, j] != output_matrix[i, j]:
@@ -268,41 +256,41 @@ def visualize_mixcolumns(input_matrix, output_matrix):
     plt.tight_layout()
     plt.show()
 
-def visualize_add_round_key(state_matrix, round_key_matrix):
+def addroundvis(state_matrix, round_keym):
     fig, axs = plt.subplots(1, 3, figsize=(12, 4))
 
-    # State matrix visualization
+   
     axs[0].imshow(state_matrix, cmap='viridis', interpolation='nearest')
     axs[0].set_title('State Matrix (Before AddRoundKey)')
     axs[0].set_xticks(np.arange(0, 4, 1))
     axs[0].set_yticks(np.arange(0, 4, 1))
 
-    # Round key matrix visualization
-    axs[1].imshow(round_key_matrix, cmap='viridis', interpolation='nearest')
+   
+    axs[1].imshow(round_keym, cmap='viridis', interpolation='nearest')
     axs[1].set_title('Round Key Matrix')
     axs[1].set_xticks(np.arange(0, 4, 1))
     axs[1].set_yticks(np.arange(0, 4, 1))
 
-    # Resultant matrix visualization after adding round key
-    result_matrix = np.bitwise_xor(state_matrix, round_key_matrix)
+   
+    result_matrix = np.bitwise_xor(state_matrix, round_keym)
     axs[2].imshow(result_matrix, cmap='viridis', interpolation='nearest')
     axs[2].set_title('Result Matrix (After AddRoundKey)')
     axs[2].set_xticks(np.arange(0, 4, 1))
     axs[2].set_yticks(np.arange(0, 4, 1))
 
-    # Highlight differences between state matrix and round key matrix
+   
     for i in range(4):
         for j in range(4):
             if state_matrix[i, j] != result_matrix[i, j]:
                 axs[0].text(j, i, f'{state_matrix[i, j]:02X}', ha='center', va='center', color='red', fontsize=10)
-                axs[1].text(j, i, f'{round_key_matrix[i, j]:02X}', ha='center', va='center', color='red', fontsize=10)
+                axs[1].text(j, i, f'{round_keym[i, j]:02X}', ha='center', va='center', color='red', fontsize=10)
                 axs[2].text(j, i, f'{result_matrix[i, j]:02X}', ha='center', va='center', color='red', fontsize=10)
 
     plt.tight_layout()
     plt.show()
 
-def visualize_gf_operations():
-    # Visualize addition in GF(2^8)
+def gfaddmultvis():
+    
     gf_addition = np.zeros((256, 256), dtype=np.uint8)
     for i in range(256):
         gf_addition[:, i] = np.bitwise_xor(np.arange(256, dtype=np.uint8), i)
@@ -315,10 +303,10 @@ def visualize_gf_operations():
     plt.colorbar(label='Result Byte')
     plt.show()
 
-    # Visualize multiplication in GF(2^8)
+    
     gf_multiplication = np.zeros((256, 256), dtype=np.uint8)
     for i in range(256):
-        gf_multiplication[:, i] = np.array([galois_multiplication(i, j) for j in range(256)], dtype=np.uint8)
+        gf_multiplication[:, i] = np.array([multgal(i, j) for j in range(256)], dtype=np.uint8)
 
 
 
@@ -330,20 +318,20 @@ def visualize_gf_operations():
     plt.colorbar(label='Result Byte')
     plt.show()
 
-def galois_op():
-    # Define the elements of GF(2^8)
-    elements = [i for i in range(256)]  # 0 to 255
+def operationgal():
+    
+    elements = [i for i in range(256)] 
 
     addition_graph = nx.DiGraph()
     for a in elements:
         for b in elements:
             addition_graph.add_edge(a, gf_add(a, b))
 
-    # Create directed graph for multiplication table
+    
     multiplication_graph = nx.DiGraph()
     for a in elements:
         for b in elements:
-            multiplication_graph.add_edge(a, galois_multiplication(a, b))
+            multiplication_graph.add_edge(a, multgal(a, b))
 
     # Plot the graphs
     plt.figure(figsize=(12, 6))
@@ -365,23 +353,23 @@ if __name__ == '__main__':
     print("Encrypting : ")    
     print("Original:", plain_text)
     
-    encrypted = aesEncrypt(plain_text, cipher_key)
+    encrypted = encrypt(plain_text, cipher_key)
     print("Encrypted:", encrypted)
     
-    decrypted = aesDecrypt(encrypted, cipher_key)
+    decrypted = decrypt(encrypted, cipher_key)
     print("Decrypted:", decrypted)
-    K = text2Unicode(cipher_key)
-    P = text2Unicode(plain_text)
+    K = preparetext(cipher_key)
+    P = preparetext(plain_text)
     S = subBytes(P)
     T = shiftRows(S)
     R = mixCol(T)
     Q = addRoundKey(T,K)
-    visualize_matrix(P, 'Plaintext Matrix')
-    visualize_sbox_substitution(P,S)
-    visualize_shiftrows(S, T)
-    visualize_mixcolumns(T, R)
-    visualize_add_round_key(R, K)
-    visualize_gf_operations()
-    galois_op()
+    plaintextmat(P, 'Plaintext Matrix')
+    sboxvisual(P,S)
+    shiftrowvis(S, T)
+    mixcolvis(T, R)
+    addroundvis(R, K)
+    gfaddmultvis()
+    operationgal()
     eq_system = sp.Matrix([P,S,T,R,Q])
     sp.pprint(eq_system)
